@@ -2,7 +2,7 @@
 
 **WeCloudData / SDA Data Engineering Capstone — Ahmed Saad Al-Faidi**
 
-A repeatable data engineering pipeline that collects Saudi Arabia job postings from the Careerjet Partner API, stores them raw, cleans and standardizes the data, deduplicates across collection runs, validates quality, and loads the curated records into a Snowflake analytical table.
+A repeatable data engineering pipeline that collects Saudi Arabia job postings from four sources (Careerjet, Tanqeeb, Jooble, and Techmap), stores them raw, cleans and standardizes the data, deduplicates across collection runs, validates quality, and loads the curated records into a Snowflake analytical table.
 
 The deliverable is the **pipeline and curated dataset**, not a downstream application.
 
@@ -11,15 +11,19 @@ The deliverable is the **pipeline and curated dataset**, not a downstream applic
 ## Architecture
 
 ```
-Careerjet Partner API  (primary source — locale_code=en_SA)
-         │
-         ▼
+Careerjet API ── Tanqeeb ── Jooble (JSON) ── Techmap (RapidAPI)
+     │               │            │                 │
+     └───────────────┴────────────┴─────────────────┘
+                                │
+                                ▼
 ┌─────────────────────────────────────────────────┐
 │              COLLECTION STAGE                   │
-│  pipeline/collectors/careerjet.py               │
-│  Paginates API, stores raw JSON payload         │
+│  pipeline/collectors/careerjet.py (live API)    │
+│  pipeline/collectors/tanqeeb.py   (scraper)     │
+│  pipeline/collectors/techmap.py   (RapidAPI)    │
+│  Jooble: data/raw/jooble_combined*.json         │
 └──────────────────┬──────────────────────────────┘
-                   │ writes to
+                   │ Careerjet: writes to SQLite
                    ▼
 ┌─────────────────────────────────────────────────┐
 │           OLTP TIER  (SQLite dev / PG prod)     │
@@ -28,10 +32,10 @@ Careerjet Partner API  (primary source — locale_code=en_SA)
 │  processed_fingerprints — cross-run dedup state │
 │  quality_log         — all flags and rejections │
 └──────────────────┬──────────────────────────────┘
-                   │ read by
+                   │ read by (Careerjet Python path only)
                    ▼
 ┌─────────────────────────────────────────────────┐
-│           PROCESSING STAGES                     │
+│           PROCESSING STAGES  (Python)           │
 │  cleaner.py       — normalize fields, generate  │
 │                     job_fingerprint             │
 │  standardizer.py  — career level, salary parse  │
@@ -40,12 +44,21 @@ Careerjet Partner API  (primary source — locale_code=en_SA)
 │  validator.py     — 15 quality rules; writes to │
 │                     quality_log                 │
 └──────────────────┬──────────────────────────────┘
-                   │ non-dup, non-rejected records
+                   │ all 4 sources loaded via
+                   │ scripts/land_raw_to_snowflake.py
                    ▼
 ┌─────────────────────────────────────────────────┐
-│           OLAP TIER  (Snowflake)                │
-│  jobs table — curated analytical dataset        │
-│  431 records loaded (first production run)      │
+│           BRONZE TIER  (Snowflake)              │
+│  BRONZE.raw_jobs — 425 raw records              │
+│  99 Careerjet + 117 Tanqeeb + 109 Jooble        │
+│                 + 100 Techmap                   │
+└──────────────────┬──────────────────────────────┘
+                   │ transformed by dbt
+                   ▼
+┌─────────────────────────────────────────────────┐
+│           OLAP TIER  (Snowflake GOLD)           │
+│  GOLD.fct_jobs — 416 curated records            │
+│  (4 sources; last rebuilt 2026-09-13)           │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -75,21 +88,17 @@ BRONZE.raw_jobs (source)
                         └─► SILVER.int_jobs_standardized   (career level, salary, out_of_region)
                                 └─► SILVER.int_jobs_deduplicated  (is_duplicate, duplicate_of_raw_id)
                                         └─► SILVER.int_jobs_quality_flags (quality_flags, is_rejected)
-                                                    └─► GOLD.fct_jobs  (327 curated records)
+                                                    └─► GOLD.fct_jobs  (416 curated records)
 ```
 
 ### Canonical dataset for submission
 
-`GOLD.fct_jobs` (dbt path) is the **official curated dataset** for this project and the submission source of truth.
+`GOLD.fct_jobs` (dbt path) is the **official curated dataset** for this project and the submission source of truth. All four sources are integrated; BRONZE was last reloaded and `dbt run` last executed on 2026-09-13.
 
-`PUBLIC.jobs` is a parallel output produced by the Python pipeline path (`runner.py` → `snowflake_loader.py`). It is more current in row count but is **not the submission source of truth**.
-
-Both tables will be reconciled — BRONZE will be reloaded from SQLite and `dbt run` re-executed — in a single operation once all sources (Careerjet + Tanqeeb) are integrated. Until then, row counts in the two tables intentionally differ:
-
-| Table | Schema | Path | Status |
-|---|---|---|---|
-| `fct_jobs` | `GOLD` | dbt (BRONZE → Silver models → GOLD) | **Canonical — submission source of truth.** Last synced 2026-09-10 (829 rows). |
-| `jobs` | `PUBLIC` | Python (runner.py → snowflake_loader.py) | Parallel output; currently ahead in row count; not the submission source of truth. |
+| Table | Schema | Path | Rows | Status |
+|---|---|---|---|---|
+| `fct_jobs` | `GOLD` | dbt (BRONZE → Silver models → GOLD) | **416** | **Canonical — submission source of truth.** Last synced 2026-09-13. |
+| `jobs` | `PUBLIC` | Python (runner.py → snowflake_loader.py) | varies | Parallel Careerjet-only output; not the submission source of truth. |
 
 ### Running the dbt models
 
@@ -109,7 +118,10 @@ Requires `dbt/profiles.yml` (gitignored — contains Snowflake credentials). See
 job-market-pipeline/
 ├── pipeline/
 │   ├── collectors/
-│   │   └── careerjet.py          Careerjet Partner API collector
+│   │   ├── careerjet.py          Careerjet Partner API collector (live API)
+│   │   ├── tanqeeb.py            Tanqeeb job board scraper
+│   │   ├── techmap.py            Techmap RapidAPI collector (reads data/raw/)
+│   │   └── jadarat_csv.py        Jadarat open-data CSV reader (evaluated, not active)
 │   ├── processing/
 │   │   ├── cleaner.py            Field normalization + fingerprint generation
 │   │   ├── standardizer.py       Career level mapping, salary parsing
@@ -119,10 +131,20 @@ job-market-pipeline/
 │   ├── modeling/
 │   │   └── snowflake_loader.py   Loads curated records into Snowflake jobs table
 │   └── runner.py                 Main orchestrator — runs all stages in sequence
+├── dbt/
+│   └── job_market_pipeline/
+│       ├── models/
+│       │   ├── staging/          stg_{careerjet,tanqeeb,jooble,techmap}__raw_jobs.sql
+│       │   │                     sources.yml
+│       │   ├── intermediate/     int_jobs_{cleaned,standardized,deduplicated,quality_flags}.sql
+│       │   └── marts/            fct_jobs.sql  schema.yml
+│       └── profiles.yml          (gitignored — Snowflake credentials)
 ├── db/
 │   ├── schema.sql                SQLite/PostgreSQL table definitions
 │   └── init_db.py                Creates tables from schema.sql
 ├── scripts/
+│   ├── land_raw_to_snowflake.py  BRONZE loader — truncates and reloads all 4 sources
+│   ├── scrape_tanqeeb.py         Tanqeeb multi-step scrape scripts (2026-09-09)
 │   └── backfill_warn005.sql      Retroactive WARN-005 backfill (run 2026-09-08)
 ├── tests/
 │   ├── conftest.py               Shared fixtures; temp SQLite DB per test
@@ -132,8 +154,12 @@ job-market-pipeline/
 │   ├── test_validator.py
 │   └── test_pipeline_integration.py
 ├── data/
+│   ├── raw/                      Committed source files for static-load sources
+│   │   ├── tanqeeb_jobs.json          117 records (scraped 2026-09-09)
+│   │   ├── jooble_combined_2026-09-12.json  109 records (API pull, 9 calls)
+│   │   └── techmap_live_raw.json      100 records (RapidAPI pull 2026-09-13)
 │   └── samples/                  Small committed fixtures (review_sample.csv)
-├── collect_full.py               5-page collection runner (495 records)
+├── collect_full.py               5-page Careerjet collection runner (495 records)
 ├── phase5_run.py                 Validation runner; writes quality_log to DB
 ├── phase6_load.py                Snowflake load runner
 ├── snowflake_connection_test.py  Smoke test for Snowflake credentials
@@ -167,16 +193,18 @@ cp .env.example .env
 
 Required variables:
 
-| Variable | Description |
-|---|---|
-| `DB_URL` | SQLite: `sqlite:///./data/pipeline.db` · PostgreSQL: `postgresql://user:pass@host:5432/db` |
-| `CAREERJET_API_KEY` | Careerjet Partner API affiliation ID — register at careerjet.com/partners/api/ |
-| `SNOWFLAKE_ACCOUNT` | Snowflake account identifier (e.g. `abc12345.us-east-1`) |
-| `SNOWFLAKE_USER` | Snowflake username |
-| `SNOWFLAKE_PASSWORD` | Snowflake password |
-| `SNOWFLAKE_WAREHOUSE` | Compute warehouse name (e.g. `COMPUTE_WH`) |
-| `SNOWFLAKE_DATABASE` | Target database (e.g. `JOB_PIPELINE_DB`) |
-| `SNOWFLAKE_SCHEMA` | Target schema (e.g. `PUBLIC`) |
+| Variable | Required | Description |
+|---|---|---|
+| `DB_URL` | Yes | SQLite: `sqlite:///./data/pipeline.db` · PostgreSQL: `postgresql://user:pass@host:5432/db` |
+| `CAREERJET_API_KEY` | Yes | Careerjet Partner API affiliation ID — register at careerjet.com/partners/api/ |
+| `SNOWFLAKE_ACCOUNT` | Yes | Snowflake account identifier (e.g. `abc12345.us-east-1`) |
+| `SNOWFLAKE_USER` | Yes | Snowflake username |
+| `SNOWFLAKE_PASSWORD` | Yes | Snowflake password |
+| `SNOWFLAKE_WAREHOUSE` | Yes | Compute warehouse name (e.g. `COMPUTE_WH`) |
+| `SNOWFLAKE_DATABASE` | Yes | Target database (e.g. `JOB_PIPELINE_DB`) |
+| `SNOWFLAKE_SCHEMA` | Yes | Target schema (e.g. `PUBLIC`) |
+| `JOOBLE_API_KEY` | For re-collection | Jooble API key (RapidAPI) — needed only to re-pull Jooble data; current integration loads from `data/raw/jooble_combined_2026-09-12.json` |
+| `TECHMAP_API_KEY` | For re-collection | Techmap API key (RapidAPI `daily-international-job-postings`) — needed only to re-pull; current integration loads from `data/raw/techmap_live_raw.json` |
 
 The Careerjet `Referer` header defaults to `https://www.careerjet.com.sa/` (hardcoded
 in `pipeline/collectors/careerjet.py` as `DEFAULT_REFERRER`). Set `CAREERJET_REFERRER`
@@ -204,26 +232,44 @@ then deletes it. Reports PASS/FAIL with the exact error if any step fails.
 
 ## Running the Pipeline
 
-### Option A — Unified runner (intended entry point for repeat runs)
+### Option A — Unified runner (Careerjet / Tanqeeb / Techmap)
 
 ```bash
-python -m pipeline.runner --source careerjet
+python -m pipeline.runner --source careerjet   # Careerjet Partner API (locale_code=en_SA)
+python -m pipeline.runner --source tanqeeb     # Tanqeeb scraper
+python -m pipeline.runner --source techmap     # Techmap RapidAPI (reads data/raw/techmap_live_raw.json)
 ```
 
-Runs all stages in sequence: collect → clean → standardize → deduplicate →
-validate → load to Snowflake. Assigns a new `run_id` (UUID) per execution.
-Duplicate records are detected via fingerprint and URL matching and are marked
-`is_duplicate = True` but never deleted.
+Runs all stages in sequence for the specified source: collect → clean → standardize →
+deduplicate → validate → load to Snowflake. Assigns a new `run_id` (UUID) per
+execution. Duplicate records are detected via fingerprint and URL matching and are
+marked `is_duplicate = True` but never deleted.
+
+> **Note:** Jooble does not have a `runner.py` path — its data was collected manually
+> via the API and is loaded from `data/raw/jooble_combined_2026-09-12.json` via
+> `scripts/land_raw_to_snowflake.py` (see Option B).
 
 > **Note:** `runner.py` was not tested end-to-end during the initial build — the
-> per-stage scripts below are the only workflow verified end-to-end. `runner.py`
-> also does not write collected records to `raw_jobs`, so there is no raw-layer
-> audit trail for runner.py runs. For Careerjet this does not affect deduplication
-> correctness (fingerprint dedup uses `processed_fingerprints`, not `raw_jobs`, and
-> Careerjet's dynamic tracking URLs make URL-based cross-run dedup unreliable
-> regardless), but it is a known gap.
+> per-stage scripts below are the only workflow verified end-to-end for Careerjet.
+> `runner.py` also does not write collected records to `raw_jobs`, so there is no
+> raw-layer audit trail for runner.py runs.
 
-### Option B — Stage-by-stage (used during initial build)
+### Option B — Reload all sources into BRONZE and rebuild GOLD via dbt
+
+This is the canonical path for the current 4-source Snowflake dataset:
+
+```bash
+# 1. Truncate and reload all 4 sources into BRONZE.raw_jobs (425 rows)
+python scripts/land_raw_to_snowflake.py
+
+# 2. Rebuild all Silver views and GOLD.fct_jobs
+dbt run  --profiles-dir dbt --project-dir dbt/job_market_pipeline
+
+# 3. Validate
+dbt test --profiles-dir dbt --project-dir dbt/job_market_pipeline
+```
+
+### Option C — Stage-by-stage Careerjet (used during initial build)
 
 ```bash
 # Stage 1: collect (5 pages × 99 records from Careerjet Saudi Arabia)
@@ -236,8 +282,8 @@ python phase5_run.py
 python phase6_load.py
 ```
 
-Use this form to inspect intermediate results between stages or to re-run a
-single stage after a bug fix.
+Use this form to inspect intermediate Careerjet results between stages or to
+re-run a single stage after a bug fix.
 
 ---
 
@@ -262,16 +308,29 @@ Key fields: `job_id` (PK), `raw_id` (FK to OLTP), `title`, `company_name`,
 
 ---
 
-## Production Run Results (2026-09-07)
+## Production Run Results
+
+### Initial Careerjet-only run (2026-09-07)
 
 | Metric | Count |
 |---|---|
 | Raw records collected | 495 |
 | Duplicate records detected | 64 (12.9%) |
 | Records rejected by validation | 0 |
-| Records loaded to Snowflake | **431** |
+| Records loaded to Snowflake (`PUBLIC.jobs`) | **431** |
 | Records flagged WARN-005 (low-confidence fingerprint) | 36 (8.3% of loaded) |
 | Tests passing | **97** |
+
+### Current 4-source state (2026-09-13)
+
+| Metric | Count |
+|---|---|
+| Sources integrated | 4 (Careerjet, Tanqeeb, Jooble, Techmap) |
+| Raw records in BRONZE (`raw_jobs`) | **425** (99 + 117 + 109 + 100) |
+| Curated records in GOLD (`fct_jobs`) | **416** |
+| Records filtered by dedup + quality | 9 |
+| dbt models | 9 (all passing) |
+| dbt schema tests | 6 (all passing) |
 
 ---
 
@@ -316,9 +375,9 @@ records are logged with rule `DEDUP-FINGERPRINT-AUDIT` in `quality_log`.
 
 ### 2. Low-confidence fingerprints (WARN-005 — 36 records)
 
-36 of the 431 loaded records (8.3%) have both `company_name` and
-`location_city` null, causing the fingerprint to degrade toward a title-only
-hash. These records are flagged `WARN-005 LOW-CONFIDENCE-FINGERPRINT` in
+36 of the 431 Careerjet records loaded in the initial production run (8.3%) have
+both `company_name` and `location_city` null, causing the fingerprint to degrade
+toward a title-only hash. These records are flagged `WARN-005 LOW-CONFIDENCE-FINGERPRINT` in
 `quality_flags` and are queryable:
 
 ```sql
