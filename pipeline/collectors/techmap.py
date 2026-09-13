@@ -1,24 +1,17 @@
 """
 Techmap Saudi Arabia job collector — pipeline collector interface.
 
-SAMPLE-BASED COLLECTOR — reads from a static file, not a live API call.
-No TECHMAP_API_KEY exists in .env yet. To convert to live collection,
-implement the RapidAPI call using the endpoint tested in the playground,
-and add rate limiting/pagination per Techmap's actual quota (unconfirmed
-— ToS not fully verified, see docs/source_investigation.md Techmap entry).
+Reads from data/raw/techmap_live_raw.json — 100 records collected via
+the RapidAPI Techmap endpoint (daily-international-job-postings) on
+2026-09-13. Saudi Arabia, September 2026, pages 1-10.
 
-Source: data/raw/techmap_sample.json — 10 records collected by a teammate
-via the RapidAPI Techmap endpoint on 2026-09-07. This file is committed
-as a static sample; it does not grow on repeated runs.
+API details: Basic (free) tier; 100 req/month quota; 10 jobs/request (fixed).
+source_job_id : jsonLD.identifier — native 24-char MongoDB ObjectID hex string.
+source_url    : jsonLD.url — direct third-party job board link (DEjobs, GulfTalent, etc.)
 
-source_job_id: No native job ID is present in this export. A synthetic
-"fp-<fingerprint>" ID is used as a placeholder so records can be referenced
-in quality_log and dedup state. The "fp-" prefix distinguishes it from a
-real platform ID. Replace with the native ID field once a live key is
-configured and the API response schema is confirmed.
+ToS note: not fully verified; see README Known Limitations §8.
 """
 
-import hashlib
 import json
 import logging
 import uuid
@@ -27,76 +20,67 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-SAMPLE_FILE = Path(__file__).resolve().parents[2] / "data" / "raw" / "techmap_sample.json"
+LIVE_FILE = Path(__file__).resolve().parents[2] / "data" / "raw" / "techmap_live_raw.json"
 
-
-def _fingerprint(title: str | None, company: str | None, city: str | None) -> str:
-    def norm(v):
-        return (v or "").upper().strip() or "NULL"
-    raw = f"{norm(title)}|{norm(company)}|{norm(city)}"
-    return hashlib.sha256(raw.encode()).hexdigest()
+_COUNTRY_CODES = {"sa": "Saudi Arabia"}
 
 
 def collect(run_id: str) -> list[dict]:
     """
-    Load Techmap sample records and return standard raw_jobs records.
-
-    Reads from the static sample file — no network calls are made.
+    Load Techmap records from the live pull JSON and return standard raw_jobs records.
+    Reads from the saved live pull file — no network calls are made.
 
     Returns a list of dicts with keys:
         raw_id, run_id, source_name, source_job_id, source_url,
         raw_payload (JSON string), collected_at (ISO-8601 UTC)
     """
-    if not SAMPLE_FILE.exists():
+    if not LIVE_FILE.exists():
         raise FileNotFoundError(
-            f"Techmap sample file not found: {SAMPLE_FILE}\n"
-            "Run the STEP A preparation script to regenerate it, or check the path."
+            f"Techmap live file not found: {LIVE_FILE}\n"
+            "Re-run _techmap_phase2.py to regenerate it."
         )
 
-    with open(SAMPLE_FILE, encoding="utf-8") as f:
+    with open(LIVE_FILE, encoding="utf-8") as f:
         records = json.load(f)
 
-    log.info("Techmap collect: reading %d records from static sample (run_id=%s)",
+    log.info("Techmap collect: reading %d records from live pull (run_id=%s)",
              len(records), run_id)
 
     collected_at = datetime.now(timezone.utc).isoformat()
     raw_records = []
 
     for rec in records:
-        title   = rec.get("title")
-        company = rec.get("company")
-        city    = rec.get("city")
+        country_raw = rec.get("country") or ""
+        country = _COUNTRY_CODES.get(country_raw.lower(), None) or country_raw or "Saudi Arabia"
 
-        fp = _fingerprint(title, company, city)
-        # "fp-" prefix marks this as a synthetic ID — replace when native ID is confirmed
-        synthetic_job_id = f"fp-{fp}"
-
-        # raw_payload carries everything the staging model will need to extract
         payload = {
-            "title":        title,
-            "company":      company,
-            "city":         city,
-            "country":      rec.get("country"),
-            "date_created": rec.get("date_created"),   # full ISO-8601 UTC timestamp
+            "title":        rec.get("title"),
+            "company":      rec.get("company"),
+            "city":         rec.get("city"),
+            "country":      country,
+            "date_created": rec.get("date_created"),
+            "date_posted":  rec.get("date_posted"),
+            "description":  rec.get("description"),
             "occupation":   rec.get("occupation"),
             "industry":     rec.get("industry"),
             "work_place":   rec.get("work_place"),
             "work_type":    rec.get("work_type"),
             "career_level": rec.get("career_level"),
             "portal":       rec.get("portal"),
+            "source":       rec.get("source"),
             "has_salary":   rec.get("has_salary"),
             "is_duplicate": rec.get("is_duplicate"),
         }
 
         raw_records.append({
-            "raw_id":       str(uuid.uuid4()),
-            "run_id":       run_id,
-            "source_name":  "techmap",
-            "source_job_id": synthetic_job_id,
-            "source_url":   rec.get("job_url"),
-            "raw_payload":  json.dumps(payload, ensure_ascii=False),
-            "collected_at": collected_at,
+            "raw_id":        str(uuid.uuid4()),
+            "run_id":        run_id,
+            "source_name":   "techmap",
+            "source_job_id": rec.get("native_id") or "",
+            "source_url":    rec.get("source_url") or "",
+            "raw_payload":   json.dumps(payload, ensure_ascii=False),
+            "collected_at":  collected_at,
         })
 
-    log.info("Techmap collect done: %d records loaded from sample", len(raw_records))
+    log.info("Techmap collect done: %d records loaded", len(raw_records))
     return raw_records

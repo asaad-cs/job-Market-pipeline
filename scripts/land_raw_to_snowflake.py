@@ -1,12 +1,12 @@
 """
-Land four-source sample into Snowflake BRONZE.
+Land four-source data into Snowflake BRONZE.
 
 Sources loaded:
   Careerjet : 99 records from SQLite run dfa8e653 (2026-09-06, single 1-page pull)
   Tanqeeb   : 117 records from data/raw/tanqeeb_jobs.json
   Jooble    : 109 records from data/raw/jooble_combined_2026-09-12.json
-  Techmap   : 10 records from data/raw/techmap_sample.json (static sample,
-              teammate RapidAPI pull 2026-09-07; no live key; ToS unverified)
+  Techmap   : 100 records from data/raw/techmap_live_raw.json
+              (live RapidAPI pull 2026-09-13; pages 1-10; native IDs and URLs)
 
 Idempotency: TRUNCATEs BRONZE.raw_jobs and BRONZE.collection_runs before
 loading. Safe to re-run — always produces a clean state.
@@ -128,21 +128,22 @@ def _load_tanqeeb():
 
 
 def _load_techmap():
-    """Read techmap_sample.json via the collector. Returns (run_row, job_rows)."""
+    """Read techmap_live_raw.json via the collector. Returns (run_row, job_rows)."""
     import sys as _sys
     _sys.path.insert(0, ".")
     from pipeline.collectors.techmap import collect
 
     run_id = str(uuid.uuid4())
-    # Teammate collected this sample on 2026-09-07; use that as the run timestamp
-    collection_date = "2026-09-07T00:00:00+00:00"
+    # Live pull executed 2026-09-13; pages 1-10, countryCode=sa, dateCreated=2026-09
+    collection_date = "2026-09-13T00:00:00+00:00"
 
     raw = collect(run_id=run_id)
 
     run_row = (
         run_id, collection_date, collection_date, "techmap", len(raw),
-        "Static 10-record sample collected by teammate via RapidAPI Techmap endpoint "
-        "(2026-09-07). No live API key configured. ToS not fully verified."
+        "100-record live pull via RapidAPI Techmap endpoint (2026-09-13); "
+        "pages 1-10; Saudi Arabia; native IDs (jsonLD.identifier); "
+        "provenance: 60% DEjobs, 32% GulfTalent, 8% ATS/Reed. ToS not fully verified."
     )
 
     job_rows = []
@@ -157,7 +158,7 @@ def _load_techmap():
             collection_date,    # use teammate collection date, not today's load time
         ))
 
-    print(f"  Techmap (JSON)     : run {run_id[:8]}  {len(job_rows)} records  {collection_date[:19]}")
+    print(f"  Techmap (live)     : run {run_id[:8]}  {len(job_rows)} records  {collection_date[:19]}")
     return run_row, job_rows
 
 

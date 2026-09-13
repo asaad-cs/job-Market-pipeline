@@ -19,7 +19,7 @@ sources:
             careerjet — keys: title, company, locations, description, salary, url, date, site
             tanqeeb   — keys: job_title, company, city, country, job_description, salary, posting_date, scraped_at
             jooble    — keys: title, company, location, snippet, salary, updated, id, link, source
-            techmap   — keys: title, company, city, country, date_created, occupation, industry, work_place, work_type, career_level, portal, has_salary, is_duplicate
+            techmap   — keys: title, company, city, country, date_created, date_posted, description, occupation, industry, work_place, work_type, career_level, portal, source, has_salary, is_duplicate
         columns:
           - name: raw_id
             description: UUID assigned at collection time — primary key.

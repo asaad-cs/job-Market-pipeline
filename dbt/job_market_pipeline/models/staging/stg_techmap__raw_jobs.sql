@@ -3,19 +3,19 @@
 -- Extracts Techmap-specific fields from BRONZE.raw_jobs VARIANT payload
 -- and maps them to the canonical staging shape shared by all four sources.
 --
--- Techmap native fields used:
---   title, company, city (raw — messy Arabic concatenated strings for rows 4-10),
---   country (always "Saudi Arabia" / "sa"), date_created (full ISO-8601 UTC timestamp)
+-- Source: 100-record live pull via RapidAPI Techmap endpoint (2026-09-13),
+--   Saudi Arabia, September 2026, pages 1-10. Native IDs and source URLs
+--   are real platform values (jsonLD.identifier / jsonLD.url).
+--
+-- Provenance breakdown: 60% DEjobs, 32% GulfTalent, 8% ATS/Reed.
+--   See README Known Limitations §8 for GulfTalent provenance discussion.
 --
 -- Known limitations:
---   description : not present in this export (no full text; has_salary is a flag only)
---   salary_raw  : not present in this export (has_salary boolean only)
---   city        : rows 4-10 contain concatenated Arabic region/city/country strings
---                 (e.g. "الشرقية الظهران السعودية"); left as-is per sample decision
---   title       : rows 1-3 (Manatal portal) include " — Riyadh, Saudi Arabia" suffix
---                 appended by the Techmap aggregator; not stripped here
---   source      : static 10-record sample (teammate RapidAPI pull 2026-09-07);
---                 no live API key configured; ToS not fully verified
+--   salary_raw  : not present in this export (has_salary is a boolean flag only)
+--   city        : some records may contain Arabic city names from GulfTalent records;
+--                 handled by the city-alias CASE in int_jobs_cleaned.sql
+--   title       : DEjobs portal records may include location suffixes appended by
+--                 Techmap aggregator (e.g. " — Riyadh, Saudi Arabia"); not stripped here
 
 with source as (
     select * from {{ source('raw', 'raw_jobs') }}
@@ -30,16 +30,15 @@ select
     source_url,
     collected_at,
 
-    -- Title (includes " — Riyadh, Saudi Arabia" suffix on Manatal portal rows)
+    -- Title
     nullif(raw_payload:title::string, '')                                   as title_raw,
 
     -- Company
     nullif(raw_payload:company::string, '')                                 as company_raw,
 
-    -- Location: city + country combined into a single token for the shared
-    -- location-parsing logic in int_jobs_cleaned.sql.
-    -- city is the raw Techmap city field (Arabic concatenated string for rows 4-10).
-    -- country is always "Saudi Arabia" from the collector mapping of countryCode="sa".
+    -- Location: city + country combined for shared location-parsing logic in
+    -- int_jobs_cleaned.sql. country is always "Saudi Arabia" (normalized from "sa"
+    -- in the collector). city is the raw Techmap city field.
     case
         when nullif(raw_payload:city::string, '') is not null
             then nullif(raw_payload:city::string, '')
@@ -48,8 +47,8 @@ select
         else nullif(raw_payload:country::string, '')
     end                                                                     as location_raw,
 
-    -- No description field in this export
-    cast(null as varchar)                                                   as description,
+    -- Description from jsonLD (present for most records; NULL where not provided)
+    nullif(raw_payload:description::string, '')                             as description,
 
     -- No salary value in this export (has_salary is a boolean flag only)
     cast(null as varchar)                                                   as salary_raw,
@@ -57,8 +56,8 @@ select
     -- api_date_raw: full ISO-8601 UTC timestamp from dateCreated field
     raw_payload:date_created::string                                        as api_date_raw,
 
-    -- posting_date_raw: same as date_created — timestamps vary across a 4.5-hour
-    -- window (02:20–06:48 UTC), ruling out a single-call collection artifact.
+    -- posting_date_raw: same as date_created — used as best proxy for posting date.
+    -- Timestamp variation across records rules out a single-call collection artifact.
     -- Treated as likely real posting times; not empirically validated with
     -- a multi-day dataset. TRY_TO_DATE() in int_jobs_cleaned handles conversion.
     raw_payload:date_created::string                                        as posting_date_raw
