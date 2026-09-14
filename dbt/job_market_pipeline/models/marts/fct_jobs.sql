@@ -9,7 +9,7 @@ with src as (
 )
 
 select
-    uuid_string()                   as job_id,
+    md5(job_fingerprint)            as job_id,  -- deterministic: stable across rebuilds/reloads; unique by construction (one row per fingerprint post-dedup)
     raw_id,
     run_id,
     source_name,

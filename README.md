@@ -104,7 +104,7 @@ BRONZE.raw_jobs (source)
 
 ```bash
 cd dbt/job_market_pipeline
-dbt run          # build all 6 models
+dbt run          # build all 9 models
 dbt test         # run schema tests
 ```
 
@@ -203,7 +203,7 @@ Required variables:
 | `SNOWFLAKE_WAREHOUSE` | Yes | Compute warehouse name (e.g. `COMPUTE_WH`) |
 | `SNOWFLAKE_DATABASE` | Yes | Target database (e.g. `JOB_PIPELINE_DB`) |
 | `SNOWFLAKE_SCHEMA` | Yes | Target schema (e.g. `PUBLIC`) |
-| `JOOBLE_API_KEY` | For re-collection | Jooble API key (RapidAPI) — needed only to re-pull Jooble data; current integration loads from `data/raw/jooble_combined_2026-09-12.json` |
+| `JOOBLE_SA_API_KEY` | For re-collection | Jooble Saudi Arabia search API key — register at `sa.jooble.org/api/about`; needed only to re-pull Jooble data; current integration loads from `data/raw/jooble_combined_2026-09-12.json` |
 | `TECHMAP_API_KEY` | For re-collection | Techmap API key (RapidAPI `daily-international-job-postings`) — needed only to re-pull; current integration loads from `data/raw/techmap_live_raw.json` |
 
 The Careerjet `Referer` header defaults to `https://www.careerjet.com.sa/` (hardcoded

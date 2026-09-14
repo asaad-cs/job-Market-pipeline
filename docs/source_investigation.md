@@ -18,6 +18,8 @@
 | Jadarat (HRDF) | No (open data only) | Not accessible (ECONNREFUSED) | **Yes — Nafath required** | Aggregate stats only | **Exclude / Explore open data** |
 | Taqat | No | **Yes** — fully permissive | **Yes — Nafath-like auth** | None (login wall) | **Exclude** |
 | Tanqeeb | No | **Partial** — detail pages allowed; `similar_jobs.php` disallowed | **No — public browse** | Title, company, city, date, employment type, description, experience, education | **Approved — mentor exception granted [DATE TBC]** |
+| Jooble | **Yes** (aggregator search API) | N/A — official API, no scraping | API key (free email registration) | Title, company, location, snippet, updated date, native id, source | **Use — official API, active source** |
+| Techmap | **Yes** (via RapidAPI marketplace) | N/A — official API, no scraping | RapidAPI key (free tier, 100 req/mo) | Title, company, city, country, dateCreated, native id (`jsonLD.identifier`), url, provenance | **Use with caveat — ToS not fully verified** |
 
 ---
 
@@ -270,6 +272,47 @@ Selected over Akhtaboot for richer structured fields (real posting dates, employ
 
 ---
 
+### 10. Jooble (sa.jooble.org)
+
+*Investigated and integrated 2026-09-09 to 2026-09-12, after the original report.*
+
+**robots.txt:** Not applicable — Jooble is consumed exclusively through its official public search API, so no site crawling occurs. (Jooble also operates its own aggregator crawler, `JoobleBot`, which several sites investigated here explicitly allow — e.g. Akhtaboot, §6.)
+
+**Terms of Service / API status:**
+Jooble provides an official job-search API. Access requires free registration at `https://sa.jooble.org/api/about`, which issues a Saudi-Arabia-specific API key by email. Endpoint: `POST https://sa.jooble.org/api/{key}` — the key is embedded in the URL path, with a JSON body (`keywords`, `location`, `page`). The free-tier quota is **500 requests lifetime per key**. These facts were confirmed from `https://help.jooble.org`. Because collection is via a sanctioned API rather than scraping, the legal posture is clean — analogous to Careerjet.
+
+**Access barriers:** None beyond obtaining the free API key. No login wall, no scraping, no robots.txt conflict.
+
+**Data structure** (confirmed by test pull, `jooble_test_pull.py`):
+native `id` (job ID), `title`, `company`, `location` (city name only — no country token), `snippet` (HTML-entity description excerpt, ~200 chars), `updated` (real listing update date — used as posting_date), `source` (originating board), `link` (source URL), and `salary` (**0% coverage** for Saudi Arabia listings). 109 records collected across 9 API calls (2026-09-09 five-call pull + 2026-09-12 four-call step-B pull; 1 duplicate removed).
+
+**Verdict: Use — official API, active source in pipeline.**
+Clean legal status (sanctioned API), native stable IDs, and a real listing date. The main data gap is zero salary coverage for Saudi Arabia. Loaded to BRONZE via `scripts/land_raw_to_snowflake.py` from `data/raw/jooble_combined_2026-09-12.json`. There is no live collector module in `pipeline/collectors/` — the free tier's 500-request lifetime quota makes repeated live pulls impractical, so the collected JSON is committed and replayed on each load.
+
+---
+
+### 11. Techmap (RapidAPI — daily-international-job-postings)
+
+*Investigated and integrated 2026-09-13, after the original report.*
+
+**robots.txt:** Not applicable — consumed through the RapidAPI marketplace API, not by crawling a website.
+
+**Terms of Service / API status:**
+Techmap's "Daily International Job Postings" API is distributed via the RapidAPI marketplace on the Basic (free) tier: **100 requests/month, 10 jobs/request (fixed)**. **ToS not fully verified** — `jobdatafeeds.com` defers its actual API terms to a RapidAPI subscription agreement that was not reviewed in depth for this project. This source should be re-verified before any production or scheduled collection. (See README Known Limitations §8.)
+
+**Access barriers:** RapidAPI key (free tier) required. No scraping.
+
+**Data structure:**
+native `jsonLD.identifier` (24-char MongoDB ObjectID → `source_job_id`), `jsonLD.url` (direct third-party board link → `source_url`), `title`, `company`, `city`, `country`, `dateCreated` (platform posting timestamp — used as posting_date; re-sync behavior unconfirmed), `occupation`, `industry`, `work_type`, plus a `has_salary` boolean flag (no salary value is exported). 100 records collected in a single pull (2026-09-13, pages 1–10, Saudi Arabia).
+
+**Provenance note:**
+The 100-record pull resolved to 60% DEjobs, 32% GulfTalent, 8% ATS/Reed. GulfTalent is excluded as a *direct* source elsewhere in this report (§2) for its explicit anti-scraping ToS; Techmap's commercial aggregation relationship with GulfTalent is the relevant authorization boundary here, but that licensing relationship was not independently verified with Techmap. (See README §8.)
+
+**Verdict: Use with caveat — active source, ToS not fully verified.**
+Provides native IDs and real third-party URLs, but the unverified ToS and the GulfTalent-provenance question mean it should be treated as provisional and re-verified before any scaling. Loaded to BRONZE from `data/raw/techmap_live_raw.json` via `scripts/land_raw_to_snowflake.py`.
+
+---
+
 ## Final Recommendation
 
 The Saudi Arabia job board landscape is, in general, **highly restrictive** toward automated data collection. Six of eight sources are effectively closed to a legitimate academic pipeline. The honest recommendation is:
@@ -281,6 +324,12 @@ Registered partner programme; no scraping required. Saudi Arabia locale (`en_SA`
 
 **2. Tanqeeb (secondary scraping source — mentor-approved)**
 Investigated post-report (2026-09-09). Selected over Akhtaboot for richer structured fields (real posting dates, employment type, education, experience) and a narrower robots.txt restriction. Use of `similar_jobs.php` for seed discovery approved by project mentor on [DATE TBC]. 117 records collected in initial scrape. See `docs/tanqeeb_source_analysis.md` for full analysis and §13 for the approval record.
+
+**3. Jooble (aggregator search API — official, added 2026-09-09)**
+Official Jooble Saudi Arabia search API (free key; 500-request lifetime quota). Sanctioned API access, no scraping — clean legal status. 109 records; zero salary coverage for SA. See §10.
+
+**4. Techmap (RapidAPI aggregator — added 2026-09-13, ToS provisional)**
+RapidAPI "daily-international-job-postings," Basic free tier (100 req/month). 100 records with native IDs and real third-party board URLs. ToS not fully verified and 32% of records originate from GulfTalent via aggregation — treated as provisional pending re-verification. See §11.
 
 **Original recommendation (Akhtaboot) — not used:**
 Akhtaboot was the original primary scraping recommendation from this report. It was superseded by Tanqeeb, which provides more structured data with an equally narrow robots.txt issue. Both require the same ethical disclosure; Tanqeeb was the better data trade-off.
