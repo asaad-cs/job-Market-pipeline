@@ -17,7 +17,7 @@
 | Akhtaboot | No | **No** — Disallow: / for all bots | **No — public browse** | Title, company, location, career level | **Use as primary sample** |
 | Jadarat (HRDF) | No (open data only) | Not accessible (ECONNREFUSED) | **Yes — Nafath required** | Aggregate stats only | **Exclude / Explore open data** |
 | Taqat | No | **Yes** — fully permissive | **Yes — Nafath-like auth** | None (login wall) | **Exclude** |
-| Tanqeeb | No | **Partial** — detail pages allowed; `similar_jobs.php` disallowed | **No — public browse** | Title, company, city, date, employment type, description, experience, education | **Approved — mentor exception granted [DATE TBC]** |
+| Tanqeeb | No | **Partial** — detail pages allowed; `similar_jobs.php` disallowed | **No — public browse** | Title, company, city, date, employment type, description, experience, education | **Approved — mentor exception granted (details on file, not published)** |
 | Jooble | **Yes** (aggregator search API) | N/A — official API, no scraping | API key (free email registration) | Title, company, location, snippet, updated date, native id, source | **Use — official API, active source** |
 | Techmap | **Yes** (via RapidAPI marketplace) | N/A — official API, no scraping | RapidAPI key (free tier, 100 req/mo) | Title, company, city, country, dateCreated, native id (`jsonLD.identifier`), url, provenance | **Use with caveat — ToS not fully verified** |
 
@@ -264,8 +264,8 @@ The permissive robots.txt is misleading — there is no public content to crawl.
 | | |
 |---|---|
 | **OQ** | `similar_jobs.php` used for BFS seed discovery is Disallow in robots.txt. Detail-page scraping and homepage seeds are compliant. |
-| **Resolution** | Approved for use — project mentor granted explicit exception on **[DATE TBC]** for academic/capstone purposes. |
-| **Evidence** | [METHOD TBC — e.g., verbal approval in session / written feedback]. Full record in `docs/tanqeeb_source_analysis.md §13`. |
+| **Resolution** | Approved for use — project mentor granted an explicit exception for academic/capstone purposes. |
+| **Evidence** | Approval details are on file with the project team and are not published in this public repository. Full record in `docs/tanqeeb_source_analysis.md §13`. |
 
 **Verdict: Approved — active secondary source in pipeline.**
 Selected over Akhtaboot for richer structured fields (real posting dates, employment type, structured experience/education) and a narrower robots.txt restriction. Runs at 2.0s delays, BFS depth ≤ 2, bounded to ≤ 160 job IDs per run.
@@ -323,7 +323,7 @@ The Saudi Arabia job board landscape is, in general, **highly restrictive** towa
 Registered partner programme; no scraping required. Saudi Arabia locale (`en_SA`). Returns up to 17,000+ live listings. Selected as primary source for its clean legal status, reliable field structure, and unlimited repeat collection. Full pipeline implemented against this source.
 
 **2. Tanqeeb (secondary scraping source — mentor-approved)**
-Investigated post-report (2026-09-09). Selected over Akhtaboot for richer structured fields (real posting dates, employment type, education, experience) and a narrower robots.txt restriction. Use of `similar_jobs.php` for seed discovery approved by project mentor on [DATE TBC]. 117 records collected in initial scrape. See `docs/tanqeeb_source_analysis.md` for full analysis and §13 for the approval record.
+Investigated post-report (2026-09-09). Selected over Akhtaboot for richer structured fields (real posting dates, employment type, education, experience) and a narrower robots.txt restriction. Use of `similar_jobs.php` for seed discovery approved by the project mentor (approval details on file, not published). 117 records collected in initial scrape. See `docs/tanqeeb_source_analysis.md` for full analysis and §13 for the approval record.
 
 **3. Jooble (aggregator search API — official, added 2026-09-09)**
 Official Jooble Saudi Arabia search API (free key; 500-request lifetime quota). Sanctioned API access, no scraping — clean legal status. 109 records; zero salary coverage for SA. See §10.

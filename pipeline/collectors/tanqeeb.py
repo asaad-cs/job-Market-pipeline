@@ -6,8 +6,9 @@ collector interface: collect(run_id) -> list[dict].
 
 APPROVED EXCEPTION: This collector's seed discovery method calls
 similar_jobs.php, which is listed under Disallow in Tanqeeb's robots.txt.
-This has been explicitly approved by the project mentor on [DATE TBC] for
-academic/capstone use. The scraping of detail pages and the homepage seed
+This has been explicitly approved by the project mentor for academic/capstone
+use. Approval details are on file with the project team and are not published
+in this public repository. The scraping of detail pages and the homepage seed
 are not disallowed. See docs/tanqeeb_source_analysis.md §13 for the full
 compliance rationale and approval record.
 """
@@ -74,7 +75,8 @@ def _get_seed_jobs(session):
 
 def _get_similar_jobs(session, job_id, job_name=""):
     # APPROVED EXCEPTION: similar_jobs.php is Disallow in robots.txt.
-    # Mentor-approved for academic/capstone use on [DATE TBC]. See docs/tanqeeb_source_analysis.md §13.
+    # Mentor-approved for academic/capstone use; approval details on file with the
+    # project team, not published in this repo. See docs/tanqeeb_source_analysis.md §13.
     r = _safe_get(
         session,
         f"{BASE_URL}/tanqeeb_2020/similar_jobs.php",
