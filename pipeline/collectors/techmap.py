@@ -43,6 +43,11 @@ def collect(run_id: str) -> list[dict]:
     with open(LIVE_FILE, encoding="utf-8") as f:
         records = json.load(f)
 
+    if not isinstance(records, list):
+        raise ValueError(
+            f"Techmap live file must contain a list of records: {LIVE_FILE}"
+        )
+
     log.info("Techmap collect: reading %d records from live pull (run_id=%s)",
              len(records), run_id)
 
