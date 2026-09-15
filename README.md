@@ -510,3 +510,4 @@ before automating scheduled runs.
   `CAREERJET_REFERRER` in `.env`.
 - `data/pipeline.db` (contains real collected data) is gitignored.
   Only `data/samples/review_sample.csv` (a 20-record anonymised fixture) is committed.
+Contributors: Ibtisam
