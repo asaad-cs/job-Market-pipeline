@@ -14,6 +14,8 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 
+from pipeline.adls import upload_raw_to_adls
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -125,12 +127,16 @@ def run(source: str = "careerjet") -> None:
     else:
         raise ValueError(f"Unknown source: {source!r}")
 
-    log.info("  Collected %d raw records", len(raw_records))
+ log.info("  Collected %d raw records", len(raw_records))
 
-    # Write to SQLite immediately — audit trail and cross-run dedup state
-    if db_path and raw_records:
-        _write_raw_to_db(db_path, run_id, started_at, source, raw_records)
+# Upload raw data to Azure ADLS
+if raw_records:
+    adls_path = upload_raw_to_adls(source, raw_records)
+    log.info("  ADLS raw upload: %s", adls_path)
 
+# Write to SQLite immediately — audit trail and cross-run dedup state
+if db_path and raw_records:
+    _write_raw_to_db(db_path, run_id, started_at, source, raw_records)
     # Stage 2 — Cleaning & Standardization
     log.info("[2/6] Cleaning & Standardization")
     from pipeline.processing.cleaner import clean_records
