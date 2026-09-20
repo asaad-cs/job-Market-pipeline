@@ -127,16 +127,24 @@ def run(source: str = "careerjet") -> None:
     else:
         raise ValueError(f"Unknown source: {source!r}")
 
- log.info("  Collected %d raw records", len(raw_records))
+    log.info("  Collected %d raw records", len(raw_records))
 
-# Upload raw data to Azure ADLS
-if raw_records:
-    adls_path = upload_raw_to_adls(source, raw_records)
-    log.info("  ADLS raw upload: %s", adls_path)
+    # Write to SQLite immediately — audit trail and cross-run dedup state.
+    # Done BEFORE the ADLS upload so the local audit record is never lost,
+    # even if the raw landing-zone upload fails.
+    if db_path and raw_records:
+        _write_raw_to_db(db_path, run_id, started_at, source, raw_records)
 
-# Write to SQLite immediately — audit trail and cross-run dedup state
-if db_path and raw_records:
-    _write_raw_to_db(db_path, run_id, started_at, source, raw_records)
+    # Upload raw data to Azure ADLS raw landing zone. A network/auth failure
+    # here must not abort the pipeline — the audit trail is already persisted,
+    # so we log a warning and continue.
+    if raw_records:
+        try:
+            adls_path = upload_raw_to_adls(source, raw_records)
+            log.info("  ADLS raw upload: %s", adls_path)
+        except Exception as exc:
+            log.warning("  ADLS raw upload failed (continuing): %s", exc)
+
     # Stage 2 — Cleaning & Standardization
     log.info("[2/6] Cleaning & Standardization")
     from pipeline.processing.cleaner import clean_records

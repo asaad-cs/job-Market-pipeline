@@ -8,6 +8,7 @@ dependencies = [
     "psycopg2-binary>=2.9.0",
     "snowflake-connector-python>=3.6.0",
     "python-dotenv>=1.0.0",
+    "azure-storage-file-datalake>=12.25.0",
 ]
 
 [project.optional-dependencies]
