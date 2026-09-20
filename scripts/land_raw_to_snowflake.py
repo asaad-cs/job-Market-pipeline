@@ -1,4 +1,8 @@
 """
+⚠️ DANGER: This script TRUNCATES BRONZE.raw_jobs and BRONZE.collection_runs
+on every run. Frozen as of 2026-09-21 pending full ADLS migration.
+Do not run without ALLOW_LEGACY_LOAD=1.
+
 Land four-source data into Snowflake BRONZE.
 
 Sources loaded:
@@ -216,6 +220,17 @@ def _get_sf():
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    # FROZEN 2026-09-21: this script TRUNCATEs BRONZE.raw_jobs and reloads from
+    # local files, which would destroy ADLS-loaded rows. Refuse to run unless
+    # explicitly overridden. Remove this guard only after the ADLS -> COPY INTO
+    # path is authoritative for all four sources.
+    if os.getenv("ALLOW_LEGACY_LOAD") != "1":
+        sys.exit(
+            "REFUSED: land_raw_to_snowflake.py is FROZEN (2026-09-21). It TRUNCATES "
+            "BRONZE.raw_jobs and BRONZE.collection_runs and reloads from local files, "
+            "which would destroy ADLS-loaded data. Set ALLOW_LEGACY_LOAD=1 to override."
+        )
+
     # 1. Build in-memory record sets from all four sources
     print("Reading source data...")
     cj_run, cj_jobs = _load_careerjet()

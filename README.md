@@ -472,6 +472,14 @@ However, this interpretation has not been empirically validated with a multi-day
 dataset (all 100 records are from a single pull on 2026-09-13 and cannot confirm
 whether `dateCreated` updates on re-sync).
 
+### 10. `load_to_snowflake()` returns a bare int on the "nothing to load" path
+
+When every collected record is a duplicate/rejected, `load_to_snowflake()` returns an `int` instead of the `(loaded_count, failed)` tuple the runner unpacks, raising `TypeError: cannot unpack non-iterable int object` at Stage 5 (observed on a techmap re-run where all 100 records were prior duplicates). Pre-existing interface bug, unrelated to the ADLS work; not yet fixed.
+
+### 11. `BRONZE.collection_runs` is not populated by the ADLS → COPY INTO path
+
+The new authoritative raw-load path (`pipeline/adls.py` upload → `scripts/copy_adls_to_bronze.sql` COPY INTO) lands `BRONZE.raw_jobs` only; it does **not** write `BRONZE.collection_runs`. That audit table is currently populated **exclusively** by the now-frozen legacy loader (`scripts/land_raw_to_snowflake.py`, which requires `ALLOW_LEGACY_LOAD=1`). Before the legacy path can be fully retired, the ADLS path needs its own mechanism to populate `BRONZE.collection_runs` (a small loader or a dbt source) — otherwise the collection-run audit trail in Snowflake goes stale. This is the next blocker in the ADLS migration, tracked per the transition plan.
+
 ---
 
 ## Source Evaluation
