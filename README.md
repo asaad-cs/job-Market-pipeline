@@ -104,11 +104,70 @@ BRONZE.raw_jobs (source)
 
 ```bash
 cd dbt/job_market_pipeline
-dbt run          # build all 9 models
-dbt test         # run schema tests
+dbt run          # build all 15 models (9 medallion + 6 star-schema)
+dbt test         # run schema tests (24 total)
 ```
 
 Requires `dbt/profiles.yml` (gitignored — contains Snowflake credentials). See `.env.example` for the `SNOWFLAKE_*` variables used.
+
+---
+
+## Star Schema (Dimensional Model)
+
+On top of the flat `GOLD.fct_jobs` table, the project provides a **dimensional
+(star) model** for BI/analytics consumption (commit `aa965a7`). It is built
+**additively** — `GOLD.fct_jobs` is unchanged and remains the submission source
+of truth; the star schema is an additional set of dbt models under
+`dbt/job_market_pipeline/models/marts/star/`.
+
+### Structure
+
+A central fact table surrounded by five conformed dimensions, all in the `GOLD`
+schema:
+
+```
+              dim_date          dim_source
+                  │                 │
+    dim_company ──┼──► fct_jobs_star ◄──┼── dim_career_level
+                  │                 │
+              dim_location ─────────┘
+```
+
+| Model | Grain | Surrogate key |
+|---|---|---|
+| `fct_jobs_star` | one row per curated job (same grain & PK as `fct_jobs`) | `job_id = md5(job_fingerprint)` + FKs below |
+| `dim_company` | distinct company | `company_id` — md5 of normalized company name |
+| `dim_location` | distinct (city, country) | `location_id` — md5 of normalized city + country |
+| `dim_date` | distinct posting date | `date_id` — YYYYMMDD smart integer (`0` = no date) |
+| `dim_source` | distinct source | `source_id` — md5 of source name |
+| `dim_career_level` | distinct career level | `career_level_id` — md5 of normalized career level |
+
+`fct_jobs_star` carries the foreign keys (`company_id`, `location_id`, `date_id`,
+`source_id`, `career_level_id`) plus true measures (`salary_min`, `salary_max`,
+`salary_currency`, `salary_period`), boolean facts (`saudi_national_only`,
+`out_of_region`), and degenerate dimensions (`title`, `source_url`,
+`job_fingerprint`).
+
+### Shared-macro key generation (PK/FK can never drift)
+
+Every surrogate key is produced by a single shared macro in
+`dbt/job_market_pipeline/macros/` — `generate_company_key`,
+`generate_location_key`, `generate_date_key`, `generate_source_key`,
+`generate_career_level_key`. Each dimension **and** the corresponding
+`fct_jobs_star` foreign key call the **same** macro, so a dimension's primary
+key and the fact's foreign key are generated from identical SQL and cannot drift
+apart (no orphaned FKs by construction). Null natural values (e.g. Careerjet's
+missing posting dates, ~23% of rows) collapse into a stable "Unknown" member in
+each dimension, so every fact FK always resolves.
+
+### Verification
+
+- **Row-count parity:** `fct_jobs_star` = **416** rows = `GOLD.fct_jobs` (416).
+- **Referential integrity:** zero orphaned FKs across all five dimensions; each
+  fact FK resolves to exactly one dimension row.
+- **Tests:** 18 new dbt tests (`not_null` + `unique` on every dimension key,
+  plus 5 `relationships` tests from `fct_jobs_star` to each dimension) — all
+  passing (24 dbt tests total).
 
 ---
 
@@ -472,9 +531,11 @@ However, this interpretation has not been empirically validated with a multi-day
 dataset (all 100 records are from a single pull on 2026-09-13 and cannot confirm
 whether `dateCreated` updates on re-sync).
 
-### 10. `load_to_snowflake()` returns a bare int on the "nothing to load" path
+### 10. `load_to_snowflake()` returned a bare int on the "nothing to load" path — **FIXED (commit 98a0e25)**
 
-When every collected record is a duplicate/rejected, `load_to_snowflake()` returns an `int` instead of the `(loaded_count, failed)` tuple the runner unpacks, raising `TypeError: cannot unpack non-iterable int object` at Stage 5 (observed on a techmap re-run where all 100 records were prior duplicates). Pre-existing interface bug, unrelated to the ADLS work; not yet fixed.
+When every collected record is a duplicate/rejected, `load_to_snowflake()` returned an `int` instead of the `(loaded_count, failed)` tuple the runner unpacks, raising `TypeError: cannot unpack non-iterable int object` at Stage 5 (observed on a techmap re-run where all 100 records were prior duplicates).
+
+**FIXED (commit 98a0e25)** — `load_to_snowflake()` now returns `(0, [])` on the nothing-to-load path, matching its normal return shape. Covered by a 5-case regression suite in `tests/test_snowflake_loader.py`, and verified with a live all-duplicate techmap re-run through the runner (completes cleanly, no `TypeError`).
 
 ### 11. `BRONZE.collection_runs` is not populated by the ADLS → COPY INTO path
 
