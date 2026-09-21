@@ -141,18 +141,20 @@ SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%
 """
 
 
-def load_to_snowflake(records: list[dict]) -> int:
+def load_to_snowflake(records: list[dict]) -> tuple[int, list[tuple[str, str]]]:
     """
     Load non-duplicate, non-rejected records to Snowflake jobs table.
     Uses individual execute() calls per row so PARSE_JSON() works for the
     VARIANT quality_flags column (executemany can't mix function calls into
     its multi-row rewrite optimization).
-    Returns the count of records successfully inserted.
+    Returns (loaded_count, failed) where failed is a list of (raw_id, error)
+    tuples. The "nothing to load" path returns (0, []) — the same 2-tuple
+    shape as the normal path — so callers can always unpack the result.
     """
     to_load = [r for r in records if not r.get("is_rejected") and not r.get("is_duplicate")]
     if not to_load:
         log.info("No records to load to Snowflake (all duplicates or rejected)")
-        return 0
+        return 0, []
 
     processed_at = datetime.now(timezone.utc).isoformat()
     conn = _get_snowflake_conn()
