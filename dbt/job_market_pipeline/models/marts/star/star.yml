@@ -1,0 +1,99 @@
+version: 2
+
+models:
+  - name: dim_company
+    description: Company dimension — one row per distinct (normalized) company; null names collapse to an Unknown member.
+    columns:
+      - name: company_id
+        description: Surrogate key — md5 of the normalized company name.
+        data_tests:
+          - not_null
+          - unique
+      - name: company_name
+        description: Display company name ('Unknown' for the null member).
+
+  - name: dim_location
+    description: Location dimension — one row per distinct (city, country) pair; nulls collapse to an Unknown member.
+    columns:
+      - name: location_id
+        description: Surrogate key — md5 of normalized city + country.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_date
+    description: Date dimension keyed on a YYYYMMDD smart integer; date_id 0 is the "no date" member (Careerjet).
+    columns:
+      - name: date_id
+        description: Smart integer key (YYYYMMDD); 0 = unknown/no date.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_source
+    description: Source dimension — one row per data source.
+    columns:
+      - name: source_id
+        description: Surrogate key — md5 of the source name.
+        data_tests:
+          - not_null
+          - unique
+      - name: source_name
+        description: Data source name.
+        data_tests:
+          - not_null
+
+  - name: dim_career_level
+    description: Career-level dimension; null/blank levels collapse to an Unknown member.
+    columns:
+      - name: career_level_id
+        description: Surrogate key — md5 of the normalized career level.
+        data_tests:
+          - not_null
+          - unique
+
+  - name: fct_jobs_star
+    description: >
+      Dimensional fact table. Same grain and PK as GOLD.fct_jobs (416 curated
+      jobs) with foreign keys into the star dimensions instead of inline text.
+    columns:
+      - name: job_id
+        description: Primary key — md5(job_fingerprint); joins 1:1 with GOLD.fct_jobs.
+        data_tests:
+          - not_null
+          - unique
+      - name: company_id
+        description: FK to dim_company.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_company')
+                field: company_id
+      - name: location_id
+        description: FK to dim_location.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_location')
+                field: location_id
+      - name: date_id
+        description: FK to dim_date.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_id
+      - name: source_id
+        description: FK to dim_source.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_source')
+                field: source_id
+      - name: career_level_id
+        description: FK to dim_career_level.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_career_level')
+                field: career_level_id
