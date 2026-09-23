@@ -297,6 +297,48 @@ then deletes it. Reports PASS/FAIL with the exact error if any step fails.
 
 ## Running the Pipeline
 
+### Recommended — Orchestration wrapper (`scripts/run_full_pipeline.py`)
+
+A single phase-structured entrypoint that chains the whole ADLS pipeline. This is
+the recommended way to run the project; Options A–C below remain as documented
+manual steps for inspecting intermediate results.
+
+```bash
+# Default (no flags): --load --transform only — fully idempotent, GOLD.fct_jobs
+# stays at 416. Runs COPY INTO + collection_runs refresh, then dbt run + dbt test.
+python scripts/run_full_pipeline.py
+
+# Preview any plan without executing:
+python scripts/run_full_pipeline.py --dry-run
+
+# Full refresh — includes live collection (Careerjet API + Tanqeeb scrape) and
+# CHANGES the dataset (new run_ids grow BRONZE → GOLD counts move off 416):
+python scripts/run_full_pipeline.py --collect --load --transform
+
+# Offline replay only (no live API calls; quota-safe sources):
+python scripts/run_full_pipeline.py --collect --sources techmap,jooble
+```
+
+**Phases** (select any combination; default is `--load --transform`):
+
+| Flag | Steps | Idempotent | Live calls |
+|---|---|---|---|
+| `--collect` | `pipeline.runner` per source → ADLS upload | No (grows BRONZE) | Careerjet + Tanqeeb only; Jooble/Techmap replay saved JSON |
+| `--load` | `copy_adls_to_bronze.sql` → `refresh_collection_runs.sql` | Yes | none |
+| `--transform` | `dbt run` → `dbt test` | Yes | none |
+
+**Why `--collect` is opt-in:** it touches the live Careerjet/Tanqeeb sources and
+appends new runs to BRONZE, which moves `GOLD.fct_jobs` off the canonical 416.
+The default deliberately omits it so a routine run is always idempotent and
+416-preserving — the `--collect` flag itself is the explicit confirmation.
+
+**Failure handling:** collection is continue-on-error per source (one failed
+source does not block the others; if *all* requested sources fail, the run aborts
+before load); load and transform are fail-fast.
+
+**dbt executable:** resolved via `--dbt-path`, else `$DBT_EXECUTABLE`, else `dbt`
+on `PATH`.
+
 ### Option A — Unified runner (Careerjet / Tanqeeb / Techmap / Jooble)
 
 ```bash
