@@ -3,11 +3,12 @@ version: 2
 sources:
   - name: raw
     description: >
-      Multi-source raw data landed into Snowflake BRONZE by
-      scripts/land_raw_to_snowflake.py. Four sources: Careerjet (API),
-      Tanqeeb (scraper), Jooble (API), Techmap (static sample via RapidAPI).
-      No transformations applied — raw_payload is stored as VARIANT for
-      direct path-syntax access. Each source's staging model filters by
+      Multi-source raw data landed into Snowflake BRONZE via the Azure ADLS
+      path: pipeline/adls.py upload → scripts/copy_adls_to_bronze.sql (COPY INTO),
+      with the run audit trail populated by scripts/refresh_collection_runs.sql.
+      Four sources: Careerjet (API), Tanqeeb (scraper), Jooble (API), Techmap
+      (RapidAPI). No transformations applied — raw_payload is stored as VARIANT
+      for direct path-syntax access. Each source's staging model filters by
       source_name and extracts its own field paths from raw_payload.
     database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
     schema: BRONZE

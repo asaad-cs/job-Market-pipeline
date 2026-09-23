@@ -3,7 +3,8 @@
 -- BRONZE.raw_jobs, closing the audit-trail gap left by the ADLS -> COPY INTO
 -- path (README Known Limitation #11). The ADLS path lands raw_jobs only; this
 -- script derives one collection_runs row per (run_id) so the run audit trail
--- stays populated without the frozen legacy loader (land_raw_to_snowflake.py).
+-- stays populated without the retired legacy loader
+-- (scripts/legacy/land_raw_to_snowflake.py).
 --
 -- Run this AFTER scripts/copy_adls_to_bronze.sql (once raw_jobs is current).
 --

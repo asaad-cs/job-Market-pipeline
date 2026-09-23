@@ -287,7 +287,7 @@ Jooble provides an official job-search API. Access requires free registration at
 native `id` (job ID), `title`, `company`, `location` (city name only — no country token), `snippet` (HTML-entity description excerpt, ~200 chars), `updated` (real listing update date — used as posting_date), `source` (originating board), `link` (source URL), and `salary` (**0% coverage** for Saudi Arabia listings). 109 records collected across 9 API calls (2026-09-09 five-call pull + 2026-09-12 four-call step-B pull; 1 duplicate removed).
 
 **Verdict: Use — official API, active source in pipeline.**
-Clean legal status (sanctioned API), native stable IDs, and a real listing date. The main data gap is zero salary coverage for Saudi Arabia. Loaded to BRONZE via `scripts/land_raw_to_snowflake.py` from `data/raw/jooble_combined_2026-09-12.json`. There is no live collector module in `pipeline/collectors/` — the free tier's 500-request lifetime quota makes repeated live pulls impractical, so the collected JSON is committed and replayed on each load.
+Clean legal status (sanctioned API), native stable IDs, and a real listing date. The main data gap is zero salary coverage for Saudi Arabia. Collected by `pipeline/collectors/jooble.py`, which replays `data/raw/jooble_combined_2026-09-12.json` (no live API calls — the free tier's 500-request lifetime quota makes repeated live pulls impractical, so the collected JSON is committed and replayed on each load) and lands to BRONZE via the ADLS path (`pipeline/adls.py` → `scripts/copy_adls_to_bronze.sql`).
 
 ---
 
@@ -309,7 +309,7 @@ native `jsonLD.identifier` (24-char MongoDB ObjectID → `source_job_id`), `json
 The 100-record pull resolved to 60% DEjobs, 32% GulfTalent, 8% ATS/Reed. GulfTalent is excluded as a *direct* source elsewhere in this report (§2) for its explicit anti-scraping ToS; Techmap's commercial aggregation relationship with GulfTalent is the relevant authorization boundary here, but that licensing relationship was not independently verified with Techmap. (See README §8.)
 
 **Verdict: Use with caveat — active source, ToS not fully verified.**
-Provides native IDs and real third-party URLs, but the unverified ToS and the GulfTalent-provenance question mean it should be treated as provisional and re-verified before any scaling. Loaded to BRONZE from `data/raw/techmap_live_raw.json` via `scripts/land_raw_to_snowflake.py`.
+Provides native IDs and real third-party URLs, but the unverified ToS and the GulfTalent-provenance question mean it should be treated as provisional and re-verified before any scaling. Collected by `pipeline/collectors/techmap.py`, which replays `data/raw/techmap_live_raw.json`, and lands to BRONZE via the ADLS path (`pipeline/adls.py` → `scripts/copy_adls_to_bronze.sql`).
 
 ---
 

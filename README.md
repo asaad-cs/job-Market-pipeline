@@ -44,8 +44,9 @@ Careerjet API ── Tanqeeb ── Jooble (JSON) ── Techmap (RapidAPI)
 │  validator.py     — 15 quality rules; writes to │
 │                     quality_log                 │
 └──────────────────┬──────────────────────────────┘
-                   │ all 4 sources loaded via
-                   │ scripts/land_raw_to_snowflake.py
+                   │ all 4 sources uploaded to ADLS by pipeline/adls.py,
+                   │ then loaded via scripts/copy_adls_to_bronze.sql
+                   │ (+ scripts/refresh_collection_runs.sql for the audit trail)
                    ▼
 ┌─────────────────────────────────────────────────┐
 │           BRONZE TIER  (Snowflake)              │
@@ -72,7 +73,7 @@ The pipeline includes a dbt project (`dbt/job_market_pipeline/`) that replicates
 
 | Layer | Schema | dbt models | Contents |
 |---|---|---|---|
-| **Bronze** | `BRONZE` | *(source, not a dbt model)* | Raw VARIANT payloads from all four sources — `raw_jobs` and `collection_runs` tables loaded by `scripts/land_raw_to_snowflake.py` |
+| **Bronze** | `BRONZE` | *(source, not a dbt model)* | Raw VARIANT payloads from all four sources — `raw_jobs` loaded via the ADLS path (`pipeline/adls.py` → `scripts/copy_adls_to_bronze.sql`) and `collection_runs` populated by `scripts/refresh_collection_runs.sql` |
 | **Silver** | `SILVER` | `stg_careerjet__raw_jobs`, `stg_tanqeeb__raw_jobs`, `stg_jooble__raw_jobs`, `stg_techmap__raw_jobs`, `int_jobs_cleaned`, `int_jobs_standardized`, `int_jobs_deduplicated`, `int_jobs_quality_flags` | Field extraction, cleaning, standardization, dedup, quality flagging — all as views |
 | **Gold** | `GOLD` | `fct_jobs` | Non-duplicate, non-rejected curated records — materialized as a table |
 
@@ -202,9 +203,14 @@ job-market-pipeline/
 │   ├── schema.sql                SQLite/PostgreSQL table definitions
 │   └── init_db.py                Creates tables from schema.sql
 ├── scripts/
-│   ├── land_raw_to_snowflake.py  BRONZE loader — truncates and reloads all 4 sources
-│   ├── scrape_tanqeeb.py         Tanqeeb multi-step scrape scripts (2026-09-09)
-│   └── backfill_warn005.sql      Retroactive WARN-005 backfill (run 2026-09-08)
+│   ├── setup_azure_integration.sql  Creates the ADLS external stage (one-time)
+│   ├── copy_adls_to_bronze.sql      BRONZE loader — idempotent COPY INTO from the ADLS stage
+│   ├── refresh_collection_runs.sql  Populates BRONZE.collection_runs from raw_jobs (audit trail)
+│   ├── scrape_tanqeeb.py            Tanqeeb multi-step scrape scripts (2026-09-09)
+│   ├── backfill_warn005.sql         Retroactive WARN-005 backfill (run 2026-09-08)
+│   └── legacy/
+│       ├── land_raw_to_snowflake.py  RETIRED direct loader — superseded by the ADLS path (do not run)
+│       └── README.md                 Why it is archived and what replaced it
 ├── tests/
 │   ├── conftest.py               Shared fixtures; temp SQLite DB per test
 │   ├── test_cleaner.py
@@ -304,9 +310,11 @@ deduplicate → validate → load to Snowflake. Assigns a new `run_id` (UUID) pe
 execution. Duplicate records are detected via fingerprint and URL matching and are
 marked `is_duplicate = True` but never deleted.
 
-> **Note:** Jooble does not have a `runner.py` path — its data was collected manually
-> via the API and is loaded from `data/raw/jooble_combined_2026-09-12.json` via
-> `scripts/land_raw_to_snowflake.py` (see Option B).
+> **Note:** Jooble has a `runner.py` path (`python -m pipeline.runner --source jooble`),
+> but its collector *replays* the saved `data/raw/jooble_combined_2026-09-12.json`
+> (109 records) rather than calling the API live — this preserves Jooble's 500-call
+> lifetime quota. Like the other sources, it uploads to ADLS and lands to BRONZE via
+> Option B.
 
 > **Note:** `runner.py` was not tested end-to-end during the initial build — the
 > per-stage scripts below are the only workflow verified end-to-end for Careerjet.
@@ -335,9 +343,11 @@ dbt run  --profiles-dir dbt --project-dir dbt/job_market_pipeline
 dbt test --profiles-dir dbt --project-dir dbt/job_market_pipeline
 ```
 
-> The legacy direct loader `scripts/land_raw_to_snowflake.py` is **frozen**
-> (requires `ALLOW_LEGACY_LOAD=1`) and superseded by this ADLS path. It was the
-> only writer of `BRONZE.collection_runs` until step 2 above closed that gap.
+> The legacy direct loader is **retired** and archived at
+> `scripts/legacy/land_raw_to_snowflake.py` (still guarded by `ALLOW_LEGACY_LOAD=1`;
+> do not run — it `TRUNCATE`s BRONZE). It was the only writer of
+> `BRONZE.collection_runs` until step 2 above closed that gap. See
+> `scripts/legacy/README.md`.
 
 ### Option C — Stage-by-stage Careerjet (used during initial build)
 
@@ -505,8 +515,8 @@ Techmap is included as a fourth source using a live 100-record pull executed on
 2026-09-13 via the RapidAPI Techmap endpoint (`daily-international-job-postings`),
 Basic (free) tier, 100 req/month quota. The pull covers Saudi Arabia, September 2026,
 pages 1–10 (10 jobs/request × 10 pages). Records are saved at
-`data/raw/techmap_live_raw.json`; `scripts/land_raw_to_snowflake.py` loads them
-into BRONZE on each run.
+`data/raw/techmap_live_raw.json`; the Techmap collector replays them and the ADLS
+path (`pipeline/adls.py` → `scripts/copy_adls_to_bronze.sql`) lands them into BRONZE.
 
 **Source IDs and URLs:** `source_job_id` is the native 24-character MongoDB ObjectID
 (`jsonLD.identifier`); `source_url` is the direct third-party job board link
@@ -550,7 +560,7 @@ When every collected record is a duplicate/rejected, `load_to_snowflake()` retur
 
 ### 11. `BRONZE.collection_runs` was not populated by the ADLS → COPY INTO path — **FIXED (commit d6ce67a+1)**
 
-The ADLS raw-load path (`pipeline/adls.py` upload → `scripts/copy_adls_to_bronze.sql` COPY INTO) lands `BRONZE.raw_jobs` only; it did **not** write `BRONZE.collection_runs`. That audit table was populated **exclusively** by the now-frozen legacy loader (`scripts/land_raw_to_snowflake.py`), so the run audit trail went stale on the ADLS path.
+The ADLS raw-load path (`pipeline/adls.py` upload → `scripts/copy_adls_to_bronze.sql` COPY INTO) lands `BRONZE.raw_jobs` only; it did **not** write `BRONZE.collection_runs`. That audit table was populated **exclusively** by the legacy loader (now retired to `scripts/legacy/land_raw_to_snowflake.py`), so the run audit trail went stale on the ADLS path.
 
 **FIXED** — `scripts/refresh_collection_runs.sql` derives `BRONZE.collection_runs` directly from `BRONZE.raw_jobs` (`GROUP BY run_id, source_name` → `records_fetched`, `started_at`, `completed_at`) via an idempotent insert-only MERGE, with a static CASE lookup preserving the original provenance notes for the four baseline runs (generic note for any future run). A trailing DELETE removes orphaned audit rows whose `run_id` no longer exists in `raw_jobs` (this also cleaned up a stale legacy techmap run that predated the ADLS reload). Run it after `copy_adls_to_bronze.sql` (see Option B). Verified: exactly 4 rows (careerjet 99, jooble 109, tanqeeb 117, techmap 100), zero orphans, idempotent on re-run, and **zero impact on `GOLD.fct_jobs` / `fct_jobs_star` (both still 416)** — `collection_runs` is an audit table with no dbt model referencing it.
 
