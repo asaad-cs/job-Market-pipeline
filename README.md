@@ -297,12 +297,13 @@ then deletes it. Reports PASS/FAIL with the exact error if any step fails.
 
 ## Running the Pipeline
 
-### Option A — Unified runner (Careerjet / Tanqeeb / Techmap)
+### Option A — Unified runner (Careerjet / Tanqeeb / Techmap / Jooble)
 
 ```bash
 python -m pipeline.runner --source careerjet   # Careerjet Partner API (locale_code=en_SA)
 python -m pipeline.runner --source tanqeeb     # Tanqeeb scraper
 python -m pipeline.runner --source techmap     # Techmap RapidAPI (reads data/raw/techmap_live_raw.json)
+python -m pipeline.runner --source jooble      # Jooble (replays data/raw/jooble_combined_2026-09-12.json)
 ```
 
 Runs all stages in sequence for the specified source: collect → clean → standardize →
@@ -316,10 +317,15 @@ marked `is_duplicate = True` but never deleted.
 > lifetime quota. Like the other sources, it uploads to ADLS and lands to BRONZE via
 > Option B.
 
-> **Note:** `runner.py` was not tested end-to-end during the initial build — the
-> per-stage scripts below are the only workflow verified end-to-end for Careerjet.
-> `runner.py` also does not write collected records to `raw_jobs`, so there is no
-> raw-layer audit trail for runner.py runs.
+> **Note:** All four sources (Careerjet, Tanqeeb, Techmap, Jooble) have been
+> verified end-to-end through `runner.py` → ADLS upload → `scripts/copy_adls_to_bronze.sql`
+> COPY INTO → `BRONZE.raw_jobs` (2026-09-23). The runner writes each run's raw
+> records and a `collection_runs` row to the local SQLite OLTP tier immediately
+> after collection (and uploads the same records to ADLS), so a raw-layer audit
+> trail exists locally; `BRONZE.collection_runs` is then populated by
+> `scripts/refresh_collection_runs.sql` (Option B, step 2). The stage-by-stage
+> Careerjet workflow (Option C) remains available for inspecting intermediate
+> results, but is no longer the only verified path.
 
 ### Option B — Load BRONZE from the ADLS landing zone and rebuild GOLD via dbt
 
