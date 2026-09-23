@@ -313,20 +313,31 @@ marked `is_duplicate = True` but never deleted.
 > `runner.py` also does not write collected records to `raw_jobs`, so there is no
 > raw-layer audit trail for runner.py runs.
 
-### Option B — Reload all sources into BRONZE and rebuild GOLD via dbt
+### Option B — Load BRONZE from the ADLS landing zone and rebuild GOLD via dbt
 
-This is the canonical path for the current 4-source Snowflake dataset:
+This is the canonical path for the current 4-source Snowflake dataset. Each
+source is collected and uploaded to the ADLS raw landing zone by the runner
+(Option A); it is then loaded into Snowflake and transformed:
 
 ```bash
-# 1. Truncate and reload all 4 sources into BRONZE.raw_jobs (425 rows)
-python scripts/land_raw_to_snowflake.py
+# 1. Load any new raw files from the ADLS external stage into BRONZE.raw_jobs
+#    (idempotent COPY INTO — only ingests files not already in load history)
+#    Run the statement in: scripts/copy_adls_to_bronze.sql
 
-# 2. Rebuild all Silver views and GOLD.fct_jobs
+# 2. Refresh the run audit trail: derive BRONZE.collection_runs from raw_jobs
+#    (idempotent MERGE + orphan cleanup; preserves provenance notes) — closes #11
+#    Run the statement in: scripts/refresh_collection_runs.sql
+
+# 3. Rebuild all Silver views and GOLD.fct_jobs
 dbt run  --profiles-dir dbt --project-dir dbt/job_market_pipeline
 
-# 3. Validate
+# 4. Validate
 dbt test --profiles-dir dbt --project-dir dbt/job_market_pipeline
 ```
+
+> The legacy direct loader `scripts/land_raw_to_snowflake.py` is **frozen**
+> (requires `ALLOW_LEGACY_LOAD=1`) and superseded by this ADLS path. It was the
+> only writer of `BRONZE.collection_runs` until step 2 above closed that gap.
 
 ### Option C — Stage-by-stage Careerjet (used during initial build)
 
@@ -537,9 +548,11 @@ When every collected record is a duplicate/rejected, `load_to_snowflake()` retur
 
 **FIXED (commit 98a0e25)** — `load_to_snowflake()` now returns `(0, [])` on the nothing-to-load path, matching its normal return shape. Covered by a 5-case regression suite in `tests/test_snowflake_loader.py`, and verified with a live all-duplicate techmap re-run through the runner (completes cleanly, no `TypeError`).
 
-### 11. `BRONZE.collection_runs` is not populated by the ADLS → COPY INTO path
+### 11. `BRONZE.collection_runs` was not populated by the ADLS → COPY INTO path — **FIXED (commit d6ce67a+1)**
 
-The new authoritative raw-load path (`pipeline/adls.py` upload → `scripts/copy_adls_to_bronze.sql` COPY INTO) lands `BRONZE.raw_jobs` only; it does **not** write `BRONZE.collection_runs`. That audit table is currently populated **exclusively** by the now-frozen legacy loader (`scripts/land_raw_to_snowflake.py`, which requires `ALLOW_LEGACY_LOAD=1`). Before the legacy path can be fully retired, the ADLS path needs its own mechanism to populate `BRONZE.collection_runs` (a small loader or a dbt source) — otherwise the collection-run audit trail in Snowflake goes stale. This is the next blocker in the ADLS migration, tracked per the transition plan.
+The ADLS raw-load path (`pipeline/adls.py` upload → `scripts/copy_adls_to_bronze.sql` COPY INTO) lands `BRONZE.raw_jobs` only; it did **not** write `BRONZE.collection_runs`. That audit table was populated **exclusively** by the now-frozen legacy loader (`scripts/land_raw_to_snowflake.py`), so the run audit trail went stale on the ADLS path.
+
+**FIXED** — `scripts/refresh_collection_runs.sql` derives `BRONZE.collection_runs` directly from `BRONZE.raw_jobs` (`GROUP BY run_id, source_name` → `records_fetched`, `started_at`, `completed_at`) via an idempotent insert-only MERGE, with a static CASE lookup preserving the original provenance notes for the four baseline runs (generic note for any future run). A trailing DELETE removes orphaned audit rows whose `run_id` no longer exists in `raw_jobs` (this also cleaned up a stale legacy techmap run that predated the ADLS reload). Run it after `copy_adls_to_bronze.sql` (see Option B). Verified: exactly 4 rows (careerjet 99, jooble 109, tanqeeb 117, techmap 100), zero orphans, idempotent on re-run, and **zero impact on `GOLD.fct_jobs` / `fct_jobs_star` (both still 416)** — `collection_runs` is an audit table with no dbt model referencing it.
 
 ---
 

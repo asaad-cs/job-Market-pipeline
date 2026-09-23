@@ -44,3 +44,6 @@ scripts/test_tanqeeb*.py
 
 # Log files (operational artifacts, not source)
 *.log
+
+# Leftover redirect / test output (not source)
+test_output.txt
