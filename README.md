@@ -449,7 +449,7 @@ Key fields: `job_id` (PK), `raw_id` (FK to OLTP), `title`, `company_name`,
 | Records flagged WARN-005 (low-confidence fingerprint) | 36 (8.3% of loaded) |
 | Tests passing | **97** |
 
-### Current 4-source state (2026-09-13)
+### Current 4-source state (2026-09-28)
 
 | Metric | Count |
 |---|---|
@@ -457,8 +457,8 @@ Key fields: `job_id` (PK), `raw_id` (FK to OLTP), `title`, `company_name`,
 | Raw records in BRONZE (`raw_jobs`) | **425** (99 + 117 + 109 + 100) |
 | Curated records in GOLD (`fct_jobs`) | **416** |
 | Records filtered by dedup + quality | 9 |
-| dbt models | 9 (all passing) |
-| dbt schema tests | 6 (all passing) |
+| dbt models | 15 (9 medallion + 6 star-schema; all passing) |
+| dbt schema tests | 24 (all passing) |
 
 ---
 
@@ -468,11 +468,12 @@ Key fields: `job_id` (PK), `raw_id` (FK to OLTP), `title`, `company_name`,
 pytest tests/ -v
 ```
 
-97 tests across 5 files covering: title/company/location cleaning, fingerprint
+102 tests across 6 files covering: title/company/location cleaning, fingerprint
 generation, salary parsing, career level mapping, all 15 validation rules
 (including both firing and non-firing cases for each), deduplication stages
 (within-run URL, within-run fingerprint, cross-run URL, cross-run fingerprint,
-self-match prevention), and full pipeline integration.
+self-match prevention), full pipeline integration, and the Snowflake loader's
+nothing-to-load return-shape regression (5 cases).
 
 ---
 
