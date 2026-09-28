@@ -50,16 +50,16 @@ Careerjet API ── Tanqeeb ── Jooble (JSON) ── Techmap (RapidAPI)
                    ▼
 ┌─────────────────────────────────────────────────┐
 │           BRONZE TIER  (Snowflake)              │
-│  BRONZE.raw_jobs — 425 raw records              │
-│  99 Careerjet + 117 Tanqeeb + 109 Jooble        │
-│                 + 100 Techmap                   │
+│  BRONZE.raw_jobs — 3,184 raw records            │
+│  2,574 Careerjet + 192 Tanqeeb + 218 Jooble     │
+│                 + 200 Techmap                   │
 └──────────────────┬──────────────────────────────┘
                    │ transformed by dbt
                    ▼
 ┌─────────────────────────────────────────────────┐
 │           OLAP TIER  (Snowflake GOLD)           │
-│  GOLD.fct_jobs — 416 curated records            │
-│  (4 sources; last rebuilt 2026-09-13)           │
+│  GOLD.fct_jobs — 1,484 curated records          │
+│  (4 sources; last rebuilt 2026-09-28)           │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -89,7 +89,7 @@ BRONZE.raw_jobs (source)
                         └─► SILVER.int_jobs_standardized   (career level, salary, out_of_region)
                                 └─► SILVER.int_jobs_deduplicated  (is_duplicate, duplicate_of_raw_id)
                                         └─► SILVER.int_jobs_quality_flags (quality_flags, is_rejected)
-                                                    └─► GOLD.fct_jobs  (416 curated records)
+                                                    └─► GOLD.fct_jobs  (1,484 curated records)
 ```
 
 ### Canonical dataset for submission
@@ -98,7 +98,7 @@ BRONZE.raw_jobs (source)
 
 | Table | Schema | Path | Rows | Status |
 |---|---|---|---|---|
-| `fct_jobs` | `GOLD` | dbt (BRONZE → Silver models → GOLD) | **416** | **Canonical — submission source of truth.** Last synced 2026-09-13. |
+| `fct_jobs` | `GOLD` | dbt (BRONZE → Silver models → GOLD) | **1,484** | **Canonical — submission source of truth.** Last synced 2026-09-28. |
 | `jobs` | `PUBLIC` | Python (runner.py → snowflake_loader.py) | varies | Parallel Careerjet-only output; not the submission source of truth. |
 
 ### Running the dbt models
@@ -454,9 +454,9 @@ Key fields: `job_id` (PK), `raw_id` (FK to OLTP), `title`, `company_name`,
 | Metric | Count |
 |---|---|
 | Sources integrated | 4 (Careerjet, Tanqeeb, Jooble, Techmap) |
-| Raw records in BRONZE (`raw_jobs`) | **425** (99 + 117 + 109 + 100) |
-| Curated records in GOLD (`fct_jobs`) | **416** |
-| Records filtered by dedup + quality | 9 |
+| Raw records in BRONZE (`raw_jobs`) | **3,184** (2,574 + 192 + 218 + 200) |
+| Curated records in GOLD (`fct_jobs`) | **1,484** |
+| Records filtered by dedup + quality | 1,700 |
 | dbt models | 15 (9 medallion + 6 star-schema; all passing) |
 | dbt schema tests | 24 (all passing) |
 
@@ -542,21 +542,23 @@ The Careerjet API returns a text excerpt (~242 character mean) rather than the
 full job description. This is sufficient for profiling but cannot support
 skills extraction or detailed NLP without fetching the detail page.
 
-### 6. Cross-source deduplication is designed but not empirically validated
+### 6. Cross-source deduplication — empirically validated on the 3,184-record dataset
 
 Cross-source deduplication logic exists — jobs from all four sources are matched
 via a shared SHA-256 fingerprint schema (`SHA-256(title | company_name | location_city)`)
-in `SILVER.int_jobs_deduplicated`. A job posted on both Tanqeeb and Jooble, for example,
-would receive the same fingerprint and be deduplicated correctly.
+in `SILVER.int_jobs_deduplicated`. A job posted on two different sources receives the
+same fingerprint and is collapsed to a single canonical record.
 
-However, this has not yet been empirically validated. In the current 425-record dataset
-(~100 per source across all four sources), zero jobs appeared simultaneously across
-multiple sources, so no cross-source duplicate was actually caught and verified.
-All deduplicated records were within-source collisions.
+This has now been empirically re-verified against the full 3,184-record dataset
+(2,574 / 192 / 218 / 200 across careerjet / tanqeeb / jooble / techmap, 2026-09-29).
+**3 fingerprints appeared under more than one source** — 2 spanning Careerjet + Techmap
+and 1 spanning Careerjet + Tanqeeb — covering 8 pre-dedup records that the deduplicator
+correctly collapsed to 3 canonical rows in `GOLD.fct_jobs` (5 cross-source duplicates
+removed). The mechanism catches cross-source overlap as designed.
 
-This is expected at this sample size — genuine cross-source overlap is rare in a
-~100-record slice of each source's much larger corpus. The mechanism should be revisited
-and validated with a larger, intentionally overlapping dataset if the project scales.
+Cross-source overlap is still rare at this scale (3 of the 1,484 curated fingerprints),
+which is expected — each source is a small slice of its much larger corpus — but the
+mechanism is no longer unverified.
 
 ### 7. Techmap integrated via 100-record live API pull (2026-09-13)
 

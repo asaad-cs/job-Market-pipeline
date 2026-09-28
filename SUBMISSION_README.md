@@ -65,8 +65,11 @@ the account), so it is not required to run the pipeline.
 - Techmap's Terms of Service for automated collection are not fully verified;
   treated as provisional pending re-check before any production scaling.
 - Cross-source deduplication logic is implemented (shared fingerprint schema)
-  but not yet empirically validated — no cross-source duplicate has appeared
-  in the current ~100-record-per-source sample.
+  and empirically validated against the current 3,184-record dataset: 3
+  fingerprints appeared under more than one source (2 Careerjet+Techmap, 1
+  Careerjet+Tanqeeb; 8 pre-dedup records collapsed to 3 canonical rows), so the
+  deduplicator is confirmed to catch cross-source overlap. Such overlap is rare
+  at this scale (3 of 1,484 curated fingerprints).
 - Careerjet provides no reliable per-listing posting date (its `date` field is
   the query timestamp, not the posting date) — `posting_date` is null for all
   Careerjet records by design.
