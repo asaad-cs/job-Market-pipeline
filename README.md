@@ -163,7 +163,7 @@ each dimension, so every fact FK always resolves.
 
 ### Verification
 
-- **Row-count parity:** `fct_jobs_star` = **416** rows = `GOLD.fct_jobs` (416).
+- **Row-count parity:** `fct_jobs_star` = **1,484** rows = `GOLD.fct_jobs` (1,484).
 - **Referential integrity:** zero orphaned FKs across all five dimensions; each
   fact FK resolves to exactly one dimension row.
 - **Tests:** 18 new dbt tests (`not_null` + `unique` on every dimension key,
@@ -304,15 +304,15 @@ the recommended way to run the project; Options A–C below remain as documented
 manual steps for inspecting intermediate results.
 
 ```bash
-# Default (no flags): --load --transform only — fully idempotent, GOLD.fct_jobs
-# stays at 416. Runs COPY INTO + collection_runs refresh, then dbt run + dbt test.
+# Default (no flags): --load --transform only — fully idempotent; leaves the curated
+# GOLD.fct_jobs count unchanged. Runs COPY INTO + collection_runs refresh, then dbt run + dbt test.
 python scripts/run_full_pipeline.py
 
 # Preview any plan without executing:
 python scripts/run_full_pipeline.py --dry-run
 
 # Full refresh — includes live collection (Careerjet API + Tanqeeb scrape) and
-# CHANGES the dataset (new run_ids grow BRONZE → GOLD counts move off 416):
+# CHANGES the dataset (new run_ids grow BRONZE and the curated GOLD counts):
 python scripts/run_full_pipeline.py --collect --load --transform
 
 # Offline replay only (no live API calls; quota-safe sources):
@@ -328,9 +328,9 @@ python scripts/run_full_pipeline.py --collect --sources techmap,jooble
 | `--transform` | `dbt run` → `dbt test` | Yes | none |
 
 **Why `--collect` is opt-in:** it touches the live Careerjet/Tanqeeb sources and
-appends new runs to BRONZE, which moves `GOLD.fct_jobs` off the canonical 416.
+appends new runs to BRONZE, which grows the curated `GOLD.fct_jobs` count.
 The default deliberately omits it so a routine run is always idempotent and
-416-preserving — the `--collect` flag itself is the explicit confirmation.
+count-preserving — the `--collect` flag itself is the explicit confirmation.
 
 **Failure handling:** collection is continue-on-error per source (one failed
 source does not block the others; if *all* requested sources fail, the run aborts
@@ -613,7 +613,7 @@ When every collected record is a duplicate/rejected, `load_to_snowflake()` retur
 
 The ADLS raw-load path (`pipeline/adls.py` upload → `scripts/copy_adls_to_bronze.sql` COPY INTO) lands `BRONZE.raw_jobs` only; it did **not** write `BRONZE.collection_runs`. That audit table was populated **exclusively** by the legacy loader (now retired to `scripts/legacy/land_raw_to_snowflake.py`), so the run audit trail went stale on the ADLS path.
 
-**FIXED** — `scripts/refresh_collection_runs.sql` derives `BRONZE.collection_runs` directly from `BRONZE.raw_jobs` (`GROUP BY run_id, source_name` → `records_fetched`, `started_at`, `completed_at`) via an idempotent insert-only MERGE, with a static CASE lookup preserving the original provenance notes for the four baseline runs (generic note for any future run). A trailing DELETE removes orphaned audit rows whose `run_id` no longer exists in `raw_jobs` (this also cleaned up a stale legacy techmap run that predated the ADLS reload). Run it after `copy_adls_to_bronze.sql` (see Option B). Verified: exactly 4 rows (careerjet 99, jooble 109, tanqeeb 117, techmap 100), zero orphans, idempotent on re-run, and **zero impact on `GOLD.fct_jobs` / `fct_jobs_star` (both still 416)** — `collection_runs` is an audit table with no dbt model referencing it.
+**FIXED** — `scripts/refresh_collection_runs.sql` derives `BRONZE.collection_runs` directly from `BRONZE.raw_jobs` (`GROUP BY run_id, source_name` → `records_fetched`, `started_at`, `completed_at`) via an idempotent insert-only MERGE, with a static CASE lookup preserving the original provenance notes for the four baseline runs (generic note for any future run). A trailing DELETE removes orphaned audit rows whose `run_id` no longer exists in `raw_jobs` (this also cleaned up a stale legacy techmap run that predated the ADLS reload). Run it after `copy_adls_to_bronze.sql` (see Option B). Verified at the time of the fix (2026-09-21 baseline): exactly 4 rows (careerjet 99, jooble 109, tanqeeb 117, techmap 100), zero orphans, idempotent on re-run, and **zero impact on `GOLD.fct_jobs` / `fct_jobs_star`** — `collection_runs` is an audit table with no dbt model referencing it.
 
 ---
 
