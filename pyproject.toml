@@ -24,3 +24,12 @@ include = ["pipeline*"]
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+# Test suite was moved to archive/tests/ during the 2026-09-29 repo cleanup.
+# pythonpath=["."] keeps the repo root importable so `from pipeline...` resolves;
+# testpaths points at the relocated suite; the scraper probes under
+# archive/tests/scraper_probes are standalone scripts, not pytest tests.
+pythonpath = ["."]
+testpaths = ["archive/tests"]
+addopts = "--ignore=archive/tests/scraper_probes"

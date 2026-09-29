@@ -15,7 +15,9 @@ def use_test_db(tmp_path, monkeypatch):
     db_path = tmp_path / "test_pipeline.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
 
-    schema_sql = pathlib.Path(__file__).parent.parent / "db" / "schema.sql"
+    # Repo root is now two levels above this file (archive/tests/conftest.py);
+    # db/schema.sql stays at the repo root (not archived).
+    schema_sql = pathlib.Path(__file__).parents[2] / "db" / "schema.sql"
     conn = sqlite3.connect(str(db_path))
     conn.executescript(schema_sql.read_text())
     conn.commit()

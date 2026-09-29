@@ -40,7 +40,8 @@ sf_insert_probe.py
 verify_phase4.py
 
 # Tanqeeb iterative scratch/test scripts (superseded by scrape_tanqeeb.py)
-scripts/test_tanqeeb*.py
+# bare pattern so they stay ignored after the 2026-09-29 move to archive/tests/scraper_probes/
+test_tanqeeb*.py
 
 # Log files (operational artifacts, not source)
 *.log
